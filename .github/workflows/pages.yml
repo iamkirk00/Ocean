@@ -1,0 +1,27 @@
+name: Deploy to GitHub Pages
+
+# Publishes the site to the gh-pages branch on every push to main.
+# Branch-based Pages needs no repo-settings changes: GitHub serves
+# the gh-pages branch automatically on public repos.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          exclude_assets: '.github'
