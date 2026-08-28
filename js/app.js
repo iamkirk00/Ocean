@@ -5,6 +5,7 @@ import { speakText, stopSpeaking, playBlob, listDeviceVoices, GROQ_TTS_VOICES, G
 import { loadCharacters, saveCharacters, resetCharacters, loadSettings, saveSettings, DEFAULT_CHARACTERS } from '../data/personas.js';
 import { generateSheet, renderSingle, downloadCanvas } from './sheet.js';
 import { createFamilyVoices } from './familyVoices.js';
+import { createHomeContext } from './homeContext.js';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -27,6 +28,13 @@ function migrateSettings(s) {
     },
   };
 }
+
+// ============================================================ family board bridge
+// When these pages are served from Family Commons (/ocean), the family's login
+// is on this same origin — so the whales can read today's real board and think
+// with the family server's AI. On GitHub Pages every call below no-ops.
+const home = createHomeContext();
+const OTHER = { blu: 'wright', wright: 'blu' };
 
 // Browsers only allow audio after the user has interacted with the page.
 let userInteracted = false;
@@ -177,6 +185,22 @@ function performEmote(charId, emote) {
   else if (e.expr) p.setExpression(e.expr, 3);
 }
 
+// A board fact, said the way each whale would say it.
+const FACT_LINES = {
+  blu: [
+    '[smile] Straight from the family board: {f}.',
+    '[nod] Checked the board — {f}. What are you doing with that?',
+  ],
+  wright: [
+    '[shrug] Board says {f}. Don\'t shoot the messenger.',
+    '[nod] {f}. I read it so you didn\'t have to. This is my whole contribution.',
+  ],
+};
+function factLine(charId, fact) {
+  const arr = FACT_LINES[charId];
+  return arr[Math.floor(Math.random() * arr.length)].replace('{f}', fact);
+}
+
 // ============================================================ chat
 const chatLog = $('#chat-log');
 const chatHistory = { wright: [], blu: [] }; // per-character API transcripts
@@ -211,8 +235,38 @@ function addMsg(kind, text, name = null) {
 }
 
 function provider() { return settings.provider; }
-function hasKey() { return !!(settings.keys[provider()] && settings.keys[provider()].trim()); }
-function model() { return settings.models[provider()] || defaultModel(provider()); }
+function homeAi() { const st = home.status(); return st.serverPresent && st.serverAi && st.signedIn; }
+function hasKey() {
+  if (provider() === 'home') return homeAi();
+  return !!(settings.keys[provider()] && settings.keys[provider()].trim());
+}
+function model() {
+  if (provider() === 'home') return 'family';
+  return settings.models[provider()] || defaultModel(provider());
+}
+
+/** One way in for both characters, whichever brain is answering. */
+async function askCharacter(charId, mode, messages) {
+  const char = characters[charId];
+  const other = characters[OTHER[charId]];
+  if (provider() === 'home') {
+    // Server mode: the house server thinks (board already in its prompt).
+    // Browser mode: this device thinks with the family's key, board included.
+    if (home.aiRoute() === 'server') {
+      return home.serverChat({ character: charId, persona: char, other, mode, messages });
+    }
+    await home.refresh();
+    return home.browserChat(buildSystemPrompt(char, other, mode, home.todayPrompt()), messages);
+  }
+  await home.refresh();   // keep today's board fresh for the prompt below
+  return callLLM({
+    provider: provider(),
+    apiKey: settings.keys[provider()],
+    model: model(),
+    system: buildSystemPrompt(char, other, mode, home.todayPrompt()),
+    messages,
+  });
+}
 
 function refreshBrainStatus(state = null, msg = null) {
   const el = $('#brain-status');
@@ -221,8 +275,20 @@ function refreshBrainStatus(state = null, msg = null) {
     el.textContent = msg || 'API error — fell back to scripted mode';
     return;
   }
-  if (hasKey()) { el.className = 'online'; el.textContent = `live AI — ${PROVIDERS[provider()].label} · ${model()}`; }
-  else { el.className = 'offline'; el.textContent = 'scripted mode — add an API key in Settings for live AI'; }
+  const st = home.status();
+  const board = st.hasToday ? ` · reading today's board (${st.weekday})` : '';
+  if (hasKey()) {
+    el.className = 'online';
+    el.textContent = provider() === 'home'
+      ? `live AI — the family server${board}`
+      : `live AI — ${PROVIDERS[provider()].label} · ${model()}${board}`;
+  } else if (st.hasToday) {
+    el.className = 'offline';
+    el.textContent = `scripted mode — but they can still read today's board${st.serverAi ? ' (pick Family server in Settings for live AI)' : ''}`;
+  } else {
+    el.className = 'offline';
+    el.textContent = 'scripted mode — add an API key in Settings for live AI';
+  }
 }
 refreshBrainStatus();
 
@@ -241,22 +307,21 @@ async function charRespond(charId, userText) {
   let raw;
   if (hasKey()) {
     try {
-      raw = await callLLM({
-        provider: provider(),
-        apiKey: settings.keys[provider()],
-        model: model(),
-        system: buildSystemPrompt(char, other, 'user'),
-        messages: chatHistory[charId],
-      });
+      raw = await askCharacter(charId, 'user', chatHistory[charId]);
       refreshBrainStatus();
     } catch (err) {
       console.warn(err);
-      refreshBrainStatus('error', `API error (${err.message.slice(0, 60)}…) — scripted fallback`);
-      raw = scriptedReply(charId, userText);
+      refreshBrainStatus('error', `API error (${err.message.slice(0, 60)}…) — falling back`);
+      // The thinking failed, but the board is still right here.
+      const fact = home.factAnswer(userText);
+      raw = fact ? factLine(charId, fact) : scriptedReply(charId, userText);
     }
   } else {
     await new Promise((r) => setTimeout(r, 500 + Math.random() * 600));
-    raw = scriptedReply(charId, userText);
+    // No AI — but if the family board is here, real facts still beat a script.
+    await home.refresh();
+    const fact = home.factAnswer(userText);
+    raw = fact ? factLine(charId, fact) : scriptedReply(charId, userText);
   }
   chatHistory[charId].push({ role: 'assistant', content: raw });
 
@@ -328,11 +393,7 @@ $('#btn-banter').addEventListener('click', async () => {
           : [{ role: 'user', content: '(Kick off a short, fun exchange with your best friend. Pick any topic from your life.)' }];
         let raw;
         try {
-          raw = await callLLM({
-            provider: provider(), apiKey: settings.keys[provider()], model: model(),
-            system: buildSystemPrompt(char, other, 'banter'),
-            messages,
-          });
+          raw = await askCharacter(speaker, 'banter', messages);
         } catch (err) {
           refreshBrainStatus('error', 'API error mid-banter — switched to script');
           break;
@@ -570,10 +631,48 @@ $('#sheet-preview').addEventListener('click', async (e) => {
 // ============================================================ settings
 let uiProvider = settings.provider;
 
+/** Adds the "Family server" choice when this page is served by Family Commons. */
+function syncHomeProviderUI() {
+  const st = home.status();
+  const pick = $('#provider-pick');
+  let btn = pick.querySelector('[data-provider="home"]');
+  if (st.serverPresent && st.serverAi) {
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'seg-btn';
+      btn.dataset.provider = 'home';
+      btn.textContent = 'Family server';
+      btn.addEventListener('click', () => {
+        settings.keys[uiProvider] = $('#set-apikey').value.trim();
+        uiProvider = 'home';
+        renderProviderUI();
+      });
+      pick.prepend(btn);
+    }
+  } else if (btn) {
+    btn.remove();
+  }
+  refreshBrainStatus();
+}
+
 function renderProviderUI() {
   const p = PROVIDERS[uiProvider];
   $$('#provider-pick .seg-btn').forEach((b) =>
     b.classList.toggle('active', b.dataset.provider === uiProvider));
+  // The family server keeps its own key — nothing to paste on this device.
+  const serverSide = Boolean(p.serverSide);
+  $('#set-apikey').closest('.field').style.display = serverSide ? 'none' : '';
+  $('#set-model').closest('.field').style.display = serverSide ? 'none' : '';
+  $('#btn-test-key').style.display = serverSide ? 'none' : '';
+  if (serverSide) {
+    const st = home.status();
+    $('#key-help').textContent = st.signedIn
+      ? 'Using the family server\'s own AI — no key needed here, and they can read today\'s board.'
+      : 'Sign in to Family Commons in this browser, then reload — the whales will use the family server\'s AI.';
+    $('#key-help').closest('.field').style.display = '';
+    return;
+  }
   $('#set-apikey').value = settings.keys[uiProvider] || '';
   $('#set-apikey').placeholder = p.keyHint;
   $('#key-help').innerHTML =
@@ -601,8 +700,10 @@ $$('#provider-pick .seg-btn').forEach((btn) => btn.addEventListener('click', () 
 
 $('#btn-save-settings').addEventListener('click', () => {
   settings.provider = uiProvider;
-  settings.keys[uiProvider] = $('#set-apikey').value.trim();
-  settings.models[uiProvider] = $('#set-model').value;
+  if (!PROVIDERS[uiProvider].serverSide) {
+    settings.keys[uiProvider] = $('#set-apikey').value.trim();
+    settings.models[uiProvider] = $('#set-model').value;
+  }
   saveSettings(settings);
   refreshBrainStatus();
   const res = $('#test-result');
@@ -724,6 +825,20 @@ if ('speechSynthesis' in window) {
 }
 refreshVoiceToggleUI();
 renderVoiceRows();
+
+// ============================================================ boot the family bridge
+// Detects Family Commons, pulls today's board, and — first visit on the family
+// server — points the whales at the server's AI so nobody has to paste a key.
+home.init().then((st) => {
+  if (st.serverPresent && st.serverAi && !loadSettings().provider) {
+    settings.provider = 'home';
+    uiProvider = 'home';
+    saveSettings(settings);
+  }
+  syncHomeProviderUI();
+  renderProviderUI();
+  refreshBrainStatus();
+});
 
 // ============================================================ voice inbound
 // Push-to-talk via the browser's built-in speech recognition. The final
