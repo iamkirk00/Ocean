@@ -79,6 +79,24 @@ body {
   transform: translateX(-50%); border-radius: 50%;
   background: radial-gradient(ellipse at center, #37424e33 0%, transparent 70%);
 }
+/* Splash: stays at the water the whale left, not on the whale. */
+.splash {
+  position: absolute; bottom: 20%; width: 30%; height: 20%;
+  transform: translateX(-50%); pointer-events: none; opacity: 0;
+  transform-origin: 50% 100%;
+}
+.splash svg { width: 100%; height: 100%; display: block; }
+.splash.burst { animation: splash-burst 900ms ease-out; }
+@keyframes splash-burst {
+  0%   { opacity: 0;    transform: translateX(-50%) scale(0.3, 0.35); }
+  16%  { opacity: 0.95; transform: translateX(-50%) scale(1, 1.1); }
+  45%  { opacity: 0.7;  transform: translateX(-50%) scale(1.25, 0.85); }
+  100% { opacity: 0;    transform: translateX(-50%) scale(1.6, 0.55); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash.burst { animation-duration: 1ms; }
+}
+
 #stage-hint {
   position: absolute; top: 10px; left: 12px; font-size: 11px;
   color: #63707c; background: #37424e14; padding: 3px 9px; border-radius: 999px;
