@@ -65,6 +65,19 @@ let greeted = false;
 
 const mounts = { wright: $('#mount-wright'), blu: $('#mount-blu') };
 const shadows = { wright: $('#shadow-wright'), blu: $('#shadow-blu') };
+const splashes = { wright: $('#splash-wright'), blu: $('#splash-blu') };
+
+// A breach ends in water: the puppet tells the stage when it lands, and the
+// splash plays where the whale WAS, down at its own waterline.
+for (const id of ['wright', 'blu']) {
+  whales[id].onSplash = (who) => {
+    const el = splashes[who];
+    el.style.left = `${whales[who].x}%`;
+    el.classList.remove('burst');
+    void el.offsetWidth;          // restart the animation even mid-flight
+    el.classList.add('burst');
+  };
+}
 
 // On phones, only the whale you're talking to takes the stage ("Both" shows both).
 const phoneMq = window.matchMedia('(max-width: 760px)');
@@ -107,7 +120,14 @@ function loop(now) {
     const p = whales[id];
     p.update(dt, t);
     mounts[id].style.left = `${p.x}%`;
+    // The leap lives on the mount so the whale clears its own drawing box.
+    mounts[id].style.transform =
+      `translateX(-50%) translateY(${-p.lift}%) rotate(${p.roll.toFixed(1)}deg)`;
     shadows[id].style.left = `${p.x}%`;
+    // Shadow shrinks and fades as it rises — the only depth cue that matters.
+    const away = Math.max(0, p.lift) / 118;
+    shadows[id].style.opacity = (1 - away * 0.8).toFixed(2);
+    shadows[id].style.transform = `translateX(-50%) scale(${(1 - away * 0.35).toFixed(3)})`;
   }
   if (!greeted && !whales.blu.walk && !whales.wright.walk) {
     greeted = true;
