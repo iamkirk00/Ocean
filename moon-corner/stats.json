@@ -1,0 +1,29 @@
+[
+ {
+  "version": "1x",
+  "moon_radius_mm": 305,
+  "center_behind_corner_mm": 0,
+  "depth_from_corner_mm": 305,
+  "bulge_past_flat_mm": 129,
+  "pieces": 6,
+  "grams": 598
+ },
+ {
+  "version": "2x",
+  "moon_radius_mm": 610,
+  "center_behind_corner_mm": 381,
+  "depth_from_corner_mm": 229,
+  "bulge_past_flat_mm": 53,
+  "pieces": 6,
+  "grams": 446
+ },
+ {
+  "version": "4x",
+  "moon_radius_mm": 1219,
+  "center_behind_corner_mm": 1018,
+  "depth_from_corner_mm": 202,
+  "bulge_past_flat_mm": 26,
+  "pieces": 6,
+  "grams": 404
+ }
+]
