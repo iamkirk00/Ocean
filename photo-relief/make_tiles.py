@@ -85,7 +85,12 @@ def arrow_solid(center, s, depth):
     pts = [(0, s), (-.55*s, .15*s), (-.2*s, .15*s), (-.2*s, -.8*s), (.2*s, -.8*s), (.2*s, .15*s), (.55*s, .15*s)]
     return mf.Manifold.extrude(mf.CrossSection([[(center[0] + x, center[1] + y) for x, y in pts]]), depth + .5).translate([0, 0, -.5])
 
-def build(t, h):
+def strip_pocket(cx, cy, w, h, depth, r=1.5):
+    """Shallow rounded-rectangle recess in the tile back (z=0 face) for a mounting strip."""
+    cs = mf.CrossSection.square([w - 2*r, h - 2*r], center=True).offset(r, mf.JoinType.Round)
+    return mf.Manifold.extrude(cs, depth + .5).translate([cx, cy, -.5])
+
+def build(t, h, pockets=()):
     poly = t["poly"].buffer(-GAP, join_style=2)
     x0, y0, x1, y1 = poly.bounds
     block = heightfield_solid(h, x0, y0, x1, y1)
@@ -95,6 +100,8 @@ def build(t, h):
     solid = block ^ prism
     c = poly.representative_point()
     solid = solid - text_solid(str(t["num"]), 26, (c.x, c.y - 8), ENGRAVE) - arrow_solid((c.x, c.y + 26), 12, ENGRAVE)
+    for dx, dy, w, hh, depth in pockets:                       # offsets from the tile centre (mm)
+        solid = solid - strip_pocket(c.x + dx, c.y + dy, w, hh, depth)
     g = solid.to_mesh()
     V, F = np.asarray(g.vert_properties)[:, :3], np.asarray(g.tri_verts)
     V2, F2 = fast_simplification.simplify(V.astype(np.float32), F.astype(np.int32), target_reduction=0.75)

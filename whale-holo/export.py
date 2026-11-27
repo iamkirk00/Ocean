@@ -9,10 +9,13 @@ P.MMPX = 0.5
 h = np.load("private/height.npy").astype(np.float64); lbl = np.load("private/labels.npy"); cols = np.load("private/colours.npy")
 tl = json.load(open("private/tiles.json"))
 os.makedirs("private/stl", exist_ok=True)
+# Command Picture Hanging Strips, medium (2.75" x 0.75" = 70 x 19 mm): pocket with ~1 mm play, 1 mm deep
+STRIP_W, STRIP_H, POCKET_DEPTH = 72.0, 21.0, 1.0
+POCKETS = [(0, 60, STRIP_W, STRIP_H, POCKET_DEPTH), (0, -60, STRIP_W, STRIP_H, POCKET_DEPTH)]
 tot, info = 0, []
 for t in tl["tiles"]:
     tt = dict(num=t["num"], poly=Polygon(t["poly"]))
-    tm, M = MT.build(tt, h)
+    tm, M = MT.build(tt, h, POCKETS)
     g = MT.grams(M, tm); tot += g
     tm.export(f"private/stl/hex_{t['num']:02d}.stl")
     Mc = mf.Manifold(mf.Mesh(vert_properties=np.asarray(tm.vertices, np.float32), tri_verts=np.asarray(tm.faces, np.uint32)))
