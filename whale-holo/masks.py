@@ -7,6 +7,10 @@ BODY = [(128,688),(160,736),(256,772),(400,777),(470,758),(540,726),(600,688),(6
         (740,440),(752,400),(770,300),(790,220),(800,160),(805,110),(790,60),(760,95),(690,115),(560,140),
         (450,190),(330,270),(240,370),(185,460),(145,570),(125,650)]
 FLIP = [(650,470),(700,455),(760,500),(840,580),(920,680),(975,750),(978,790),(940,800),(870,760),(790,690),(720,610),(670,560)]
+# bottom of the lowest throat ridge: everything below it is the painting's shadow, not whale
+RIDGE_BOTTOM = [(140,719),(167,725),(233,739),(300,744),(367,736),(433,717),(500,693),(567,664),(633,633),(687,608),(700,593)]
+# the nose's dark rounded underside is whale (not shadow): follow the painted outline around the chin
+NOSE_UNDERSIDE = [(126,690),(126,705),(133,722),(148,745),(170,764),(200,777),(240,784),(282,779),(320,765),(352,750),(375,738),(300,735),(140,715)]
 FIN = [(320,768),(328,832),(344,888),(384,920),(413,912),(419,848),(424,784)]
 
 def poly_mask(shape, p):
@@ -28,6 +32,12 @@ def snap(img, p, band, clip_px):
 if __name__ == "__main__":
     img = cv2.imread("private/art.jpg")
     masks = dict(body=snap(img, BODY, 8, 3), flip=snap(img, FLIP, 12, 8), fin=snap(img, FIN, 10, 6))
+    rb = np.array(RIDGE_BOTTOM, float); yy = np.arange(img.shape[0])[:, None]
+    xs = np.arange(img.shape[1])
+    cut = np.interp(xs, rb[:, 0], rb[:, 1]) + 3
+    inside = (xs >= rb[0, 0]) & (xs <= rb[-1, 0])
+    masks["body"] &= ~((yy > cut[None, :]) & inside[None, :])
+    masks["body"] |= poly_mask(img.shape[:2], NOSE_UNDERSIDE).astype(bool)
     np.savez("private/masks.npz", **masks)
     ov = img.copy()
     for name, c in (("body", (0, 255, 0)), ("flip", (0, 0, 255)), ("fin", (255, 0, 0))):

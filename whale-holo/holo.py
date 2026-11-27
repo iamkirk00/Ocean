@@ -48,6 +48,10 @@ def heightfield(rgb, masks, tr):
     t = np.clip(((xx - t0[0])*ax[0] + (yy - t0[1])*ax[1])/(ax @ ax), 0, 1)
     rb = 0.13*ART
     h_body = P.dome(body, rb)*(7 + 23*t**0.85)
+    # the nose comes further out: an extra rise centred just behind the snout tip
+    sn = np.array(tr(SNOUT)) + 0.06*(t0 - t1)
+    dn = np.hypot(xx - sn[0], yy - sn[1])*P.MMPX
+    h_body += 11.0*np.exp(-(dn/(0.10*ART))**2)*P.dome(body, 30)
     # pleats, eye, shading lines from the painting itself: dark strokes become grooves
     h_body += np.where(body, 2.6*P.highpass(gray, 6/P.MMPX)*np.clip(t*1.6, .3, 1), 0)
     # flipper: in front of the body, highest at the root, tapering toward the tip
