@@ -32,12 +32,32 @@ def snap(img, p, band, clip_px):
 if __name__ == "__main__":
     img = cv2.imread("private/art.jpg")
     masks = dict(body=snap(img, BODY, 8, 3), flip=snap(img, FLIP, 12, 8), fin=snap(img, FIN, 10, 6))
-    rb = np.array(RIDGE_BOTTOM, float); yy = np.arange(img.shape[0])[:, None]
-    xs = np.arange(img.shape[1])
-    cut = np.interp(xs, rb[:, 0], rb[:, 1]) + 3
-    inside = (xs >= rb[0, 0]) & (xs <= rb[-1, 0])
-    masks["body"] &= ~((yy > cut[None, :]) & inside[None, :])
-    masks["body"] |= poly_mask(img.shape[:2], NOSE_UNDERSIDE).astype(bool)
+    # one smooth lower outline: around the chin, then along the bottom of the throat ridges
+    from scipy.interpolate import UnivariateSpline
+    chin = [p for p in NOSE_UNDERSIDE if p[0] < 300 and p[1] > 718]
+    pts = np.array(sorted(chin + [p for p in RIDGE_BOTTOM if p[0] >= 330], key=lambda p: p[0]), float)
+    spl = UnivariateSpline(pts[:, 0], pts[:, 1], s=len(pts)*6.0)
+    xs = np.arange(img.shape[1]); yy = np.arange(img.shape[0])[:, None]
+    x_lo, x_hi = pts[0, 0], pts[-1, 0]
+    inside = (xs >= x_lo) & (xs <= x_hi)
+    curve = np.where(inside, spl(np.clip(xs, x_lo, x_hi)), 0) + 2
+    body = masks["body"].copy()
+    # fill down to the curve under the head (the chin), then cut everything below it
+    top = np.array([np.nonzero(body[:, x])[0].min() if body[:, x].any() else 10**6 for x in xs])
+    fill = (yy >= top[None, :]) & (yy <= curve[None, :]) & inside[None, :]
+    body = (body | fill) & ~((yy > curve[None, :]) & inside[None, :])
+    body = cv2.morphologyEx(body.astype(np.uint8), cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17))) > 0
+    body = cv2.GaussianBlur(body.astype(np.float32), (0, 0), 2.5) > 0.5      # soften any remaining kink
+    # the nose tip is convex: fill the small corner where the old snout edge meets the new curve
+    wy0, wy1, wx0, wx1 = 640, 790, 100, 230
+    win = body[wy0:wy1, wx0:wx1].astype(np.uint8)
+    cs, _ = cv2.findContours(win, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if cs:
+        hull = cv2.convexHull(np.vstack(cs)); fillw = np.zeros_like(win); cv2.fillPoly(fillw, [hull], 1)
+        body[wy0:wy1, wx0:wx1] |= fillw.astype(bool)
+    body = cv2.GaussianBlur(body.astype(np.float32), (0, 0), 2.0) > 0.5
+    masks["body"] = ndimage.binary_fill_holes(body)
+    np.save("private/lower_outline.npy", np.c_[xs[inside], curve[inside]])
     np.savez("private/masks.npz", **masks)
     ov = img.copy()
     for name, c in (("body", (0, 255, 0)), ("flip", (0, 0, 255)), ("fin", (255, 0, 0))):
